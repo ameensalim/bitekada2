@@ -7,10 +7,10 @@ $active_record = TRUE;//ci version 2.x
 
 $db['default'] = array(
     'dsn'   => '',
-    'hostname' => 'localhost',
-    'username' => 'root',
-    'password' => '',
-    'database' => 'b5',
+    'hostname' => '82.197.82.40',
+    'username' => 'u945619002_bitekada',
+    'password' => 'Thanveer@bitekada1',
+    'database' => 'u945619002_b5',
     'dbdriver' => 'mysqli',
     'dbprefix' => '',
     'pconnect' => FALSE,
