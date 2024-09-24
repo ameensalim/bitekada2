@@ -9,10 +9,9 @@ class Api_model extends CI_Model {
     }
 
 
-    public function retrieve_company($id) {
+    public function retrieve_company() {
         $this->db->select('*');
-        $this->db->from('company_info');
-        $this->db->where('id',$id);
+        $this->db->from('company_information');
         $this->db->limit('1');
         $query = $this->db->get();
         if ($query->num_rows() > 0) {
@@ -276,7 +275,50 @@ class Api_model extends CI_Model {
         }
         return false;
     }
+    
+    
+    public function customer_previous_balance_add($balance, $customer_id) {
+    $cusifo = $this->db->select('*')->from('customer_information')->where('customer_id',$customer_id)->get()->row();
+    $headn = $customer_id.'-'.$cusifo->customer_name;
+    $coainfo = $this->db->select('*')->from('acc_coa')->where('HeadName',$headn)->get()->row();
+    $customer_headcode = $coainfo->HeadCode;
+        $transaction_id = $this->occational->generator(10);
+       
 
+// Customer debit for previous balance
+      $cosdr = array(
+      'VNo'            =>  $transaction_id,
+      'Vtype'          =>  'PR Balance',
+      'VDate'          =>  date("Y-m-d"),
+      'COAID'          =>  $customer_headcode,
+      'Narration'      =>  'Customer debit For '.$cusifo->customer_name,
+      'Debit'          =>  $balance,
+      'Credit'         =>  0,
+      'IsPosted'       => 1,
+      'CreateBy'       => 1,
+      'CreateDate'     => date('Y-m-d H:i:s'),
+      'IsAppove'       => 1
+    );
+
+
+       
+        if(!empty($balance)){
+           $this->db->insert('acc_transaction', $cosdr); 
+          
+        }
+    }
+
+    public function product_id_check($product_id) {
+        $query = $this->db->select('*')
+                ->from('product_information')
+                ->where('product_id', $product_id)
+                ->get();
+        if ($query->num_rows() > 0) {
+            return true;
+        } else {
+            return false;
+        }
+    }
 
 
     public function total_customer(){
@@ -331,8 +373,10 @@ class Api_model extends CI_Model {
 
 // supplier list for drop down
     public function supplier_list($limit = null,$start = null){
-        $this->db->select('*');
-        $this->db->from('supplier_information');
+    $this->db->select("a.*,b.HeadCode,((select ifnull(sum(Debit),0) from acc_transaction where COAID= `b`.`HeadCode` AND IsAppove = 1)-(select ifnull(sum(Credit),0) from acc_transaction where COAID= `b`.`HeadCode` AND IsAppove = 1)) as balance");
+         $this->db->from('supplier_information a');
+         $this->db->join('acc_coa b','a.supplier_id = b.supplier_id','left');
+         $this->db->group_by('a.supplier_id');
         $this->db->limit($limit, $start);
         $query = $this->db->get();
         if ($query->num_rows() > 0) {
@@ -362,8 +406,7 @@ class Api_model extends CI_Model {
     //Supplier Previous balance adjustment
    public function previous_balance_add($balance, $supplier_id,$c_acc,$supplier_name) {
 
-        $this->load->library('auth');
-        $transaction_id = $this->auth->generator(10);
+        $transaction_id = $this->occational->generator(10);
         $coainfo = $this->db->select('*')->from('acc_coa')->where('HeadName',$c_acc)->get()->row();
         $supplier_headcode = $coainfo->HeadCode;
         
@@ -378,28 +421,16 @@ class Api_model extends CI_Model {
           'Debit'          =>  0,
           'Credit'         =>  $balance,
           'IsPosted'       => 1,
-          'CreateBy'       => $this->session->userdata('user_id'),
+          'CreateBy'       => 1,
           'CreateDate'     => date('Y-m-d H:i:s'),
           'IsAppove'       => 1
         );
 
-        $inventory = array(
-          'VNo'            =>  $transaction_id,
-          'Vtype'          =>  'PR Balance',
-          'VDate'          =>  date("Y-m-d"),
-          'COAID'          =>  10107,
-          'Narration'      =>  'Inventory credit For  '.$supplier_name,
-          'Debit'          =>  $balance,
-          'Credit'         =>  0,//purchase price asbe
-          'IsPosted'       => 1,
-          'CreateBy'       => $this->session->userdata('user_id'),
-          'CreateDate'     => date('Y-m-d H:i:s'),
-          'IsAppove'       => 1
-        ); 
+   
 
         if(!empty($balance)){
            $this->db->insert('acc_transaction', $cosdr); 
-           $this->db->insert('acc_transaction', $inventory); 
+          
         }
     }
 
@@ -412,9 +443,6 @@ class Api_model extends CI_Model {
         $this->db->delete('acc_coa');
         $this->db->where('supplier_id', $supplier_id);
         $this->db->delete('supplier_information');
-        $this->db->where('supplier_id', $supplier_id);
-        $result = $this->db->delete('supplier_ledger');
-        
         return true;
         
     } 
@@ -504,16 +532,19 @@ class Api_model extends CI_Model {
     // supplier advance
  
       public function supplier_advance_insert($data = array()){
-        return $this->db->insert('supplier_ledger', $data);
+        return $this->db->insert('acc_transaction',$data);
 
     }
 
 
      public function suppliers_ledger($supplier_id, $start, $end,$limit=null,$limit_start=null) {
-        $this->db->select('*');
-        $this->db->from('supplier_ledger');
-        $this->db->where('supplier_id', $supplier_id);
-        $this->db->where(array('date >=' => $start, 'date <=' => $end));
+        $this->db->select('a.*,b.HeadName,DATE(a.CreateDate) as CreateDate');
+        $this->db->from('acc_transaction a');
+        $this->db->join('acc_coa b','a.COAID=b.HeadCode');
+        $this->db->where('b.supplier_id', $supplier_id);
+        $this->db->where(array('VDate >=' => $start, 'VDate <=' => $end));
+        $this->db->where('a.IsAppove',1);
+        $this->db->order_by('a.VDate','desc');
         $this->db->limit($limit, $limit_start);
         $query = $this->db->get();
         if ($query->num_rows() > 0) {
@@ -524,11 +555,12 @@ class Api_model extends CI_Model {
 
     // supplier search 
     public function supplier_seach($search = null){
-        $this->db->select('*');
-        $this->db->from('supplier_information');
-        $this->db->like('supplier_name', $search,'both');
-        $this->db->or_like('mobile', $search,'both');
-        $this->db->order_by('supplier_name','asc');
+         $this->db->select("a.*,b.HeadCode,((select ifnull(sum(Debit),0) from acc_transaction where COAID= `b`.`HeadCode` AND IsAppove = 1)-(select ifnull(sum(Credit),0) from acc_transaction where COAID= `b`.`HeadCode` AND IsAppove = 1)) as balance");
+         $this->db->from('supplier_information a');
+         $this->db->join('acc_coa b','a.supplier_id = b.supplier_id','left');
+         $this->db->like('a.supplier_name', $search,'both');
+        $this->db->or_like('a.mobile', $search,'both');
+        $this->db->order_by('a.supplier_name','asc');
         $query = $this->db->get();
         if ($query->num_rows() > 0) {
             return $query->result_array();
@@ -775,7 +807,7 @@ class Api_model extends CI_Model {
             $purchase_id = date('YmdHis');
             $supplier_id = $this->input->post('supplier_id');
 
-            $supinfo     = $this->db->select('*')->from('supplier_information')->get()->row();
+            $supinfo     = $this->db->select('*')->from('supplier_information')->where('supplier_id',$supplier_id)->get()->row();
            
 
             $sup_head    = $supinfo->supplier_id.'-'.$supinfo->supplier_name;
@@ -849,7 +881,9 @@ class Api_model extends CI_Model {
             ); 
                 
 
-            $supplierdebit = array(
+     
+
+                   $supplierdebit = array(
               'VNo'            =>  $purchase_id,
               'Vtype'          =>  'Purchase',
               'VDate'          =>  $this->input->post('purchase_date'),
@@ -862,8 +896,6 @@ class Api_model extends CI_Model {
               'CreateDate'     =>  $createdate,
               'IsAppove'       =>  1
             ); 
-
-           
         
 
       
@@ -873,10 +905,7 @@ class Api_model extends CI_Model {
            
             $this->db->insert('acc_transaction',$coscr);
             $this->db->insert('acc_transaction',$purchasecoatran);  
-            $this->db->insert('acc_transaction',$expense);
-            
             $this->db->insert('acc_transaction',$cashinhand);
-           
             $this->db->insert('acc_transaction',$supplierdebit);  
 
 
@@ -991,39 +1020,7 @@ class Api_model extends CI_Model {
         return false;
     }
      
-    public function send_sms($phone=null,$msg=null){
-
-        $config_data = $this->db->select('*')->from('sms_settings')->get()->row();
-    
-        $recipients = $phone;
-        $url       = $config_data->url;//"http://sms.bdtask.com/smsapi"; 
-        $senderid  = $config_data->sender_id;//"8801847169884";
-        $apikey    = $config_data->api_key;//"C20029865c42c504afc711.77492546";
-        $message   = $msg;
-        $urltopost = $config_data->url;//"http://sms.bdtask.com/smsapi";
-        $datatopost = array (
-            "api_key"  => $apikey,
-            "type"     => 'text',
-            "senderid" => $senderid,
-            "msg"      => $message,
-            "contacts" => $recipients
-        );
-
-        $ch = curl_init ($urltopost);
-        curl_setopt ($ch, CURLOPT_POST, true);
-        curl_setopt ($ch, CURLOPT_POSTFIELDS, $datatopost);
-        curl_setopt ($ch, CURLOPT_RETURNTRANSFER, true);
-        $result = curl_exec($ch);
-        //print_r($result);
-        if ($result === false)
-        {
-        echo sprintf('<span>%s</span>CURL error:', curl_error($ch));
-        return;
-        }
-        curl_close($ch);
-        return $result;
-    
-    }
+  
     
     public function delete_customer($id){
 
@@ -1058,6 +1055,16 @@ class Api_model extends CI_Model {
 
     }
 
+
+     public function retrieve_setting_editdata() {
+        $this->db->select('*');
+        $this->db->from('web_setting');
+        $query = $this->db->get();
+        if ($query->num_rows() > 0) {
+            return $query->result_array();
+        }
+        return false;
+    }
 
     public function purchase_update() {
 
@@ -1495,7 +1502,6 @@ class Api_model extends CI_Model {
         $this->db->where('device_id',$device_id);
         $this->db->order_by('id','desc');
         $query = $this->db->get()->row();
-        
         $d1 = new DateTime(!empty($query->date)?$query->date:'');
         $d2 = new DateTime($currdate);
         $months = 0;
@@ -1533,5 +1539,11 @@ class Api_model extends CI_Model {
         $output = $final_date->format('d/m/Y');
         return $output;
         
+    }
+    
+       public function customerheadcode(){
+        $query=$this->db->query("SELECT MAX(HeadCode) as HeadCode FROM acc_coa WHERE HeadLevel='4' And HeadCode LIKE '1020300%'");
+        return $query->row();
+
     }
 }
